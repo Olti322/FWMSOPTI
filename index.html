@@ -2,7 +2,7 @@
 <html lang="sv">
 <head>
 <meta charset="UTF-8">
-<title>Plock Control v14.1</title>
+<title>Plock Control v15</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
 <style>
@@ -12,6 +12,8 @@ body {
   max-width:1200px;
   margin:auto;
 }
+
+h2 { margin-top: 10px; }
 
 .grid {
   display:grid;
@@ -39,14 +41,13 @@ body {
 input { width:90px; }
 
 .good { color:green; font-weight:bold; }
-.warn { color:orange; font-weight:bold; }
 .bad { color:red; font-weight:bold; }
 </style>
 </head>
 
 <body>
 
-<h2>Plock Control v14.1 – Stabil beslutsmotor</h2>
+<h2>Plock Control v15 – Stabil beslutsmotor</h2>
 
 <div class="top">
 <div>⏰ Nu: <input id="now" type="time" value="20:00"></div>
@@ -61,7 +62,7 @@ input { width:90px; }
 6m <input id="a6" value="200"><br>
 S <input id="aS" value="100"><br><br>
 
-Inflöde <input id="in" value="0"><br>
+Inflöde <input id="inflow" value="0">
 </div>
 
 <div class="card">
@@ -79,7 +80,7 @@ S <input id="bS" value="0"><br>
 </div>
 
 <div class="card">
-<h3>🧠 AI-rekommendation</h3>
+<h3>Rekommendation</h3>
 <div id="rec"></div>
 </div>
 
@@ -99,7 +100,7 @@ let chart;
 
 // ---------- TIME ----------
 function t(x){
-  let [h,m]=x.split(":").map(Number);
+  let [h,m] = x.split(":").map(Number);
   return h + m/60;
 }
 
@@ -110,13 +111,13 @@ function simulate(b3,b6,bS){
   let end = t(goal.value);
   let hours = Math.max(0.1, end - start);
 
-  let a3 = +a3El.value || 0;
-  let a6 = +a6El.value || 0;
-  let aS = +aSEl.value || 0;
+  let a3 = Number(a3El.value || 0);
+  let a6 = Number(a6El.value || 0);
+  let aS = Number(aSEl.value || 0);
 
-  let r3 = +r3El.value || 0;
-  let r6 = +r6El.value || 0;
-  let rS = +rSEl.value || 0;
+  let r3 = Number(r3El.value || 0);
+  let r6 = Number(r6El.value || 0);
+  let rS = Number(rSEl.value || 0);
 
   let risk = 0;
   let breakdown = null;
@@ -129,7 +130,9 @@ function simulate(b3,b6,bS){
       b3*r3 + b6*r6 + bS*rS;
 
     let demand =
-      (a3 + a6 + aS) / hours;
+      (Number(a3El.value) +
+       Number(a6El.value) +
+       Number(aSEl.value)) / hours;
 
     let net = production - demand;
 
@@ -138,7 +141,7 @@ function simulate(b3,b6,bS){
     aS -= net*step;
 
     if(a3 < 0 || a6 < 0 || aS < 0){
-      risk += 5;
+      risk++;
       if(!breakdown) breakdown = start + i;
     }
   }
@@ -150,10 +153,12 @@ function simulate(b3,b6,bS){
 function optimize(){
 
   let total =
-    +b3El.value + +b6El.value + +bSEl.value;
+    Number(b3El.value) +
+    Number(b6El.value) +
+    Number(bSEl.value);
 
   let best = null;
-  let bestRisk = 1e9;
+  let bestRisk = Infinity;
 
   for(let x=0;x<=total;x++){
     for(let y=0;y<=total-x;y++){
@@ -174,33 +179,39 @@ function optimize(){
 // ---------- STATUS ----------
 function getStatus(best){
 
-  let sim = best.sim;
-
-  if(!sim.breakdown){
-    return `<div class="good">✔ Stabil drift hela perioden</div>`;
+  if(!best || !best.sim){
+    return "<div class='bad'>❌ Ingen data</div>";
   }
 
-  return `<div class="bad">
+  if(best.sim.breakdown){
+    return `<div class='bad'>
 ❌ Risk för kapacitetsbrist<br>
-Första problem ca: <b>${sim.breakdown.toFixed(1)}h</b>
+Tid till problem: <b>${best.sim.breakdown.toFixed(1)}h</b>
 </div>`;
+  }
+
+  return "<div class='good'>✔ Stabil drift hela perioden</div>";
 }
 
-// ---------- RECOMMENDATION ----------
+// ---------- AI ----------
 function getRec(best){
 
+  if(!best) return "❌ Ingen optimering";
+
   let cap =
-    best.b3*(+r3El.value) +
-    best.b6*(+r6El.value) +
-    best.bS*(+rSEl.value);
+    best.b3*(Number(r3El.value)) +
+    best.b6*(Number(r6El.value)) +
+    best.bS*(Number(rSEl.value));
 
   let demand =
-    (+a3El.value + +a6El.value + +aSEl.value) /
+    (Number(a3El.value) +
+     Number(a6El.value) +
+     Number(aSEl.value)) /
     Math.max(0.1, (t(goal.value)-t(now.value)));
 
   let gap = demand - cap;
 
-  if(Math.abs(gap) < 1){
+  if(Math.abs(gap) < 0.5){
     return "✔ Balans mellan kapacitet och behov";
   }
 
@@ -209,24 +220,26 @@ function getRec(best){
 👉 Öka bemanning eller RT`;
   }
 
-  return `✔ Överskott: ${Math.abs(gap).toFixed(1)}<br>
-👉 Kan omfördela resurser`;
+  return `✔ Överkapacitet: ${Math.abs(gap).toFixed(1)}<br>
+👉 Omfördela resurser`;
 }
 
 // ---------- GRAPH ----------
 function draw(best){
 
+  if(!best) return;
+
   let start = t(now.value);
   let end = t(goal.value);
   let hours = Math.max(0.1, end-start);
 
-  let a3 = +a3El.value || 0;
-  let a6 = +a6El.value || 0;
-  let aS = +aSEl.value || 0;
+  let a3 = Number(a3El.value || 0);
+  let a6 = Number(a6El.value || 0);
+  let aS = Number(aSEl.value || 0);
 
-  let r3 = +r3El.value || 0;
-  let r6 = +r6El.value || 0;
-  let rS = +rSEl.value || 0;
+  let r3 = Number(r3El.value || 0);
+  let r6 = Number(r6El.value || 0);
+  let rS = Number(rSEl.value || 0);
 
   let step = 0.1;
 
@@ -240,7 +253,7 @@ function draw(best){
       best.b3*r3 + best.b6*r6 + best.bS*rS;
 
     let demand =
-      (a3 + a6 + aS) / hours;
+      (Number(a3El.value)+Number(a6El.value)+Number(aSEl.value))/hours;
 
     let net = production - demand;
 
@@ -267,10 +280,7 @@ function draw(best){
       ]
     },
     options:{
-      responsive:true,
-      plugins:{
-        legend:{position:"top"}
-      }
+      responsive:true
     }
   });
 }
