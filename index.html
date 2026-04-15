@@ -2,15 +2,42 @@
 <html lang="sv">
 <head>
 <meta charset="UTF-8">
-<title>Plock Control v13</title>
+<title>Plock Control v14.1</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
 <style>
-body { font-family: Arial; background:#f4f6f8; max-width:1200px; margin:auto; }
-.grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
-.card { background:white; padding:12px; border-radius:8px; box-shadow:0 1px 4px rgba(0,0,0,0.1); margin-top:10px; }
+body {
+  font-family: Arial;
+  background: linear-gradient(180deg, #d9f0ff, #f4f6f8);
+  max-width:1200px;
+  margin:auto;
+}
+
+.grid {
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:16px;
+}
+
+.card {
+  background:white;
+  padding:12px;
+  border-radius:8px;
+  box-shadow:0 1px 4px rgba(0,0,0,0.1);
+  margin-top:10px;
+}
+
+.top {
+  display:flex;
+  justify-content:space-between;
+  padding:10px;
+  background:white;
+  border-radius:8px;
+  margin-top:10px;
+}
+
 input { width:90px; }
-.top { display:flex; justify-content:space-between; padding:10px; background:white; border-radius:8px; }
+
 .good { color:green; font-weight:bold; }
 .warn { color:orange; font-weight:bold; }
 .bad { color:red; font-weight:bold; }
@@ -19,7 +46,7 @@ input { width:90px; }
 
 <body>
 
-<h2>Plock Control v13 – Risk & Decision Engine</h2>
+<h2>Plock Control v14.1 – Stabil beslutsmotor</h2>
 
 <div class="top">
 <div>⏰ Nu: <input id="now" type="time" value="20:00"></div>
@@ -38,7 +65,7 @@ Inflöde <input id="in" value="0"><br>
 </div>
 
 <div class="card">
-<h3>⚙ RT</h3>
+<h3>⚙ RT per person</h3>
 3m <input id="r3" value="14"><br>
 6m <input id="r6" value="10"><br>
 S <input id="rS" value="8"><br><br>
@@ -52,12 +79,12 @@ S <input id="bS" value="0"><br>
 </div>
 
 <div class="card">
-<h3>🧠 AI Rekommendation</h3>
+<h3>🧠 AI-rekommendation</h3>
 <div id="rec"></div>
 </div>
 
 <div class="card">
-<h3>⚠ Status (tid till problem)</h3>
+<h3>⚠ Status</h3>
 <div id="status"></div>
 </div>
 
@@ -68,38 +95,41 @@ S <input id="bS" value="0"><br>
 
 <script>
 
-// ---------- TIME ----------
-function t(x){ let [h,m]=x.split(":").map(Number); return h+m/60; }
+let chart;
 
-// ---------- CORE SIM ----------
+// ---------- TIME ----------
+function t(x){
+  let [h,m]=x.split(":").map(Number);
+  return h + m/60;
+}
+
+// ---------- SIMULATION ----------
 function simulate(b3,b6,bS){
 
-  let start=t(now.value);
-  let end=t(goal.value);
-  let hours=end-start;
+  let start = t(now.value);
+  let end = t(goal.value);
+  let hours = Math.max(0.1, end - start);
 
-  let a3=+a3.value;
-  let a6=+a6.value;
-  let aS=+aS.value;
+  let a3 = +a3El.value || 0;
+  let a6 = +a6El.value || 0;
+  let aS = +aSEl.value || 0;
 
-  let r3=+r3.value;
-  let r6=+r6.value;
-  let rS=+rS.value;
+  let r3 = +r3El.value || 0;
+  let r6 = +r6El.value || 0;
+  let rS = +rSEl.value || 0;
 
-  let risk=0;
-  let breakdownTime=999;
+  let risk = 0;
+  let breakdown = null;
 
-  let step=0.1;
+  let step = 0.1;
 
   for(let i=0;i<hours;i+=step){
-
-    let cur=start+i;
 
     let production =
       b3*r3 + b6*r6 + bS*rS;
 
     let demand =
-      (a3+a6+aS)/hours;
+      (a3 + a6 + aS) / hours;
 
     let net = production - demand;
 
@@ -107,26 +137,27 @@ function simulate(b3,b6,bS){
     a6 -= net*step;
     aS -= net*step;
 
-    if(a3<0 || a6<0 || aS<0){
-      if(breakdownTime===999) breakdownTime=cur;
-      risk++;
+    if(a3 < 0 || a6 < 0 || aS < 0){
+      risk += 5;
+      if(!breakdown) breakdown = start + i;
     }
   }
 
-  return {risk, breakdownTime};
+  return {risk, breakdown};
 }
 
 // ---------- OPTIMIZER ----------
 function optimize(){
 
-  let total = +b3.value + +b6.value + +bS.value;
+  let total =
+    +b3El.value + +b6El.value + +bSEl.value;
 
-  let best=null;
-  let bestRisk=1e9;
+  let best = null;
+  let bestRisk = 1e9;
 
   for(let x=0;x<=total;x++){
     for(let y=0;y<=total-x;y++){
-      let z=total-x-y;
+      let z = total - x - y;
 
       let sim = simulate(x,y,z);
 
@@ -140,99 +171,92 @@ function optimize(){
   return best;
 }
 
-// ---------- STATUS ENGINE ----------
+// ---------- STATUS ----------
 function getStatus(best){
 
   let sim = best.sim;
 
-  if(sim.breakdownTime < 999){
-
-    return `<div class="bad">
-❌ Kritisk risk<br>
-Första problem ca: <b>${sim.breakdownTime.toFixed(1)}h</b><br><br>
-👉 Systemet kommer inte hålla kapacitet hela perioden
-</div>`;
+  if(!sim.breakdown){
+    return `<div class="good">✔ Stabil drift hela perioden</div>`;
   }
 
-  return `<div class="good">
-✔ Stabil drift hela perioden
+  return `<div class="bad">
+❌ Risk för kapacitetsbrist<br>
+Första problem ca: <b>${sim.breakdown.toFixed(1)}h</b>
 </div>`;
 }
 
 // ---------- RECOMMENDATION ----------
 function getRec(best){
 
-  let total = +b3.value + +b6.value + +bS.value;
+  let cap =
+    best.b3*(+r3El.value) +
+    best.b6*(+r6El.value) +
+    best.bS*(+rSEl.value);
 
-  let currentCap =
-    best.b3*r3.value +
-    best.b6*r6.value +
-    best.bS*rS.value;
+  let demand =
+    (+a3El.value + +a6El.value + +aSEl.value) /
+    Math.max(0.1, (t(goal.value)-t(now.value)));
 
-  let target =
-    (+a3.value + +a6.value + +aS.value) /
-    (t(goal.value)-t(now.value));
+  let gap = demand - cap;
 
-  let gap = target - currentCap;
+  if(Math.abs(gap) < 1){
+    return "✔ Balans mellan kapacitet och behov";
+  }
 
-  return `
-  Rekommenderad bemanning: ${best.b3}/${best.b6}/${best.bS}<br><br>
+  if(gap > 0){
+    return `❌ Underskott: ${gap.toFixed(1)} rader/timme<br>
+👉 Öka bemanning eller RT`;
+  }
 
-  Kapacitetsgap: <b>${gap.toFixed(1)}</b><br><br>
-
-  ${gap>0 ?
-    "👉 Öka RT eller lägg till bemanning" :
-    "👉 Överkapacitet – kan omfördela"}
-  `;
+  return `✔ Överskott: ${Math.abs(gap).toFixed(1)}<br>
+👉 Kan omfördela resurser`;
 }
 
 // ---------- GRAPH ----------
-let chart;
-
 function draw(best){
 
-  let start=t(now.value);
-  let end=t(goal.value);
-  let hours=end-start;
+  let start = t(now.value);
+  let end = t(goal.value);
+  let hours = Math.max(0.1, end-start);
 
-  let a3=+a3.value;
-  let a6=+a6.value;
-  let aS=+aS.value;
+  let a3 = +a3El.value || 0;
+  let a6 = +a6El.value || 0;
+  let aS = +aSEl.value || 0;
 
-  let r3=+r3.value;
-  let r6=+r6.value;
-  let rS=+rS.value;
+  let r3 = +r3El.value || 0;
+  let r6 = +r6El.value || 0;
+  let rS = +rSEl.value || 0;
+
+  let step = 0.1;
 
   let labels=[], d3=[], d6=[], dS=[];
 
-  let step=0.1;
-
   for(let i=0;i<hours;i+=step){
 
-    let cur=start+i;
+    let cur = start + i;
 
     let production =
-      best.b3*r3 +
-      best.b6*r6 +
-      best.bS*rS;
+      best.b3*r3 + best.b6*r6 + best.bS*rS;
 
-    let demand=(a3+a6+aS)/hours;
+    let demand =
+      (a3 + a6 + aS) / hours;
 
-    let net=production-demand;
+    let net = production - demand;
 
-    a3-=net*step;
-    a6-=net*step;
-    aS-=net*step;
+    a3 -= net*step;
+    a6 -= net*step;
+    aS -= net*step;
 
-    labels.push(`${Math.floor(cur)}:00`);
-    d3.push(a3);
-    d6.push(a6);
-    dS.push(aS);
+    labels.push(Math.floor(cur)+":00");
+    d3.push(Math.max(0,a3));
+    d6.push(Math.max(0,a6));
+    dS.push(Math.max(0,aS));
   }
 
   if(chart) chart.destroy();
 
-  chart=new Chart(chartEl,{
+  chart = new Chart(chartEl,{
     type:"line",
     data:{
       labels,
@@ -241,6 +265,12 @@ function draw(best){
         {label:"6m",data:d6,borderColor:"green"},
         {label:"S",data:dS,borderColor:"orange"}
       ]
+    },
+    options:{
+      responsive:true,
+      plugins:{
+        legend:{position:"top"}
+      }
     }
   });
 }
@@ -250,8 +280,8 @@ function render(){
 
   let best = optimize();
 
-  rec.innerHTML = getRec(best);
-  status.innerHTML = getStatus(best);
+  recEl.innerHTML = getRec(best);
+  statusEl.innerHTML = getStatus(best);
 
   draw(best);
 }
@@ -259,27 +289,25 @@ function render(){
 setInterval(render,10000);
 render();
 
-// ---------- DOM ----------
-const now=document.getElementById("now");
-const goal=document.getElementById("goal");
+// ---------- ELEMENTS ----------
+const now = document.getElementById("now");
+const goal = document.getElementById("goal");
 
-const a3=document.getElementById("a3");
-const a6=document.getElementById("a6");
-const aS=document.getElementById("aS");
+const a3El = document.getElementById("a3");
+const a6El = document.getElementById("a6");
+const aSEl = document.getElementById("aS");
 
-const in=document.getElementById("in");
+const r3El = document.getElementById("r3");
+const r6El = document.getElementById("r6");
+const rSEl = document.getElementById("rS");
 
-const r3=document.getElementById("r3");
-const r6=document.getElementById("r6");
-const rS=document.getElementById("rS");
+const b3El = document.getElementById("b3");
+const b6El = document.getElementById("b6");
+const bSEl = document.getElementById("bS");
 
-const b3=document.getElementById("b3");
-const b6=document.getElementById("b6");
-const bS=document.getElementById("bS");
-
-const chartEl=document.getElementById("chart");
-const rec=document.getElementById("rec");
-const status=document.getElementById("status");
+const recEl = document.getElementById("rec");
+const statusEl = document.getElementById("status");
+const chartEl = document.getElementById("chart");
 
 </script>
 
