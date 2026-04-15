@@ -2,23 +2,25 @@
 <html lang="sv">
 <head>
 <meta charset="UTF-8">
-<title>Plock Optimizer v8</title>
+<title>Plock Optimizer v9</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
 <style>
 body { font-family: Arial; max-width: 1100px; margin:auto; background:#fafafa; }
 .section { margin-top:20px; }
 .card { background:white; padding:10px; border:1px solid #ddd; margin-top:10px; }
-.good { color:green; }
-.warn { color:orange; }
-.bad { color:red; }
-input { width:80px; }
+input { width:90px; }
 </style>
 </head>
 
 <body>
 
-<h2>Plock Optimizer v8 – Optimeringsmotor</h2>
+<h2>Plock Optimizer v9</h2>
+
+<div class="section">
+<h3>⏰ Nuvarande tid</h3>
+<div id="clock"></div>
+</div>
 
 <div class="section">
 <h3>Antal kvar</h3>
@@ -28,59 +30,68 @@ S: <input id="aS" value="100">
 </div>
 
 <div class="section">
-<h3>Inflöde / timme</h3>
+<h3>📦 Kommande inflöde (total för dagen)</h3>
 <input id="incoming" value="300">
-<p>Fördelning: 40% / 58% / 1%</p>
+<p>Fördelning av inflöde:</p>
+<ul>
+<li>3m: 40%</li>
+<li>6m: 58%</li>
+<li>S: 1%</li>
+</ul>
 </div>
 
 <div class="section">
-<h3>Hastighet per person</h3>
+<h3>⚙ RT (rate per station)</h3>
 3m: <input id="s3" value="20"><br>
 6m: <input id="s6" value="15"><br>
 S: <input id="sS" value="25">
 </div>
 
 <div class="section">
-<h3>Total bemanning (max 8)</h3>
+<h3>👥 Total bemanning (max 8)</h3>
 <input id="staff" value="6">
 </div>
 
 <div class="section">
-Sluttid: <input id="goal" type="time" value="23:00">
+<h3>🎯 Sluttid</h3>
+<input id="goal" type="time" value="23:00">
 </div>
 
-<h3>Rekommenderad bemanning (optimerad)</h3>
-<div id="recommendation"></div>
+<hr>
 
-<h3>Status</h3>
+<h3>📊 Rekommenderad bemanning</h3>
+<div id="rec"></div>
+
+<h3>📌 Status</h3>
 <div id="status"></div>
 
-<h3>Prognosgraf (hela dagen)</h3>
+<h3>📈 Prognosgraf (hela dagen)</h3>
 <canvas id="chart"></canvas>
 
 <script>
-const MAX = 8;
-let chart;
 
-// ---------------- OPTIMIZER ----------------
-function optimizeStaff() {
+// ---------- CLOCK ----------
+function updateClock(){
+  document.getElementById("clock").innerText =
+    new Date().toLocaleTimeString();
+}
 
-  let best = null;
-  let bestScore = Infinity;
+// ---------- OPTIMIZATION ----------
+function optimize(){
 
   let total = +staff.value;
+  let best = null;
+  let bestScore = 1e9;
 
-  // testa alla rimliga kombinationer
-  for (let b3 = 0; b3 <= total; b3++) {
-    for (let b6 = 0; b6 <= total - b3; b6++) {
+  for (let b3=0;b3<=total;b3++){
+    for (let b6=0;b6<=total-b3;b6++){
       let bS = total - b3 - b6;
-      if (bS < 0) continue;
 
-      let score = simulateScore(b3, b6, bS);
+      let score = simulate(b3,b6,bS);
 
-      if (score < bestScore) {
+      if (score < bestScore){
         bestScore = score;
-        best = {b3, b6, bS};
+        best = {b3,b6,bS};
       }
     }
   }
@@ -88,8 +99,8 @@ function optimizeStaff() {
   return best;
 }
 
-// ---------------- SIMULATION ----------------
-function simulateScore(b3,b6,bS) {
+// ---------- SIM ----------
+function simulate(b3,b6,bS){
 
   let a3 = +a3El.value;
   let a6 = +a6El.value;
@@ -107,32 +118,28 @@ function simulateScore(b3,b6,bS) {
 
   let penalty = 0;
 
-  for (let t=0;t<hours;t+=step) {
+  let in3 = (+incomingEl.value*0.40)/hours;
+  let in6 = (+incomingEl.value*0.58)/hours;
+  let inS = (+incomingEl.value*0.01)/hours;
 
-    let in3 = (a3*0.4)/hours;
-    let in6 = (a6*0.58)/hours;
-    let inS = (aS*0.01)/hours;
+  for (let t=0;t<hours;t+=step){
 
     a3 += in3*step - b3*s3*step;
     a6 += in6*step - b6*s6*step;
     aS += inS*step - bS*sS*step;
 
-    if (a3 < 0) penalty += 5;
-    if (a6 < 0) penalty += 5;
-    if (aS < 0) penalty += 10;
-
-    if (a3 > 300) penalty += 2;
-    if (a6 > 300) penalty += 2;
+    if (a3<0) penalty += 5;
+    if (a6<0) penalty += 5;
+    if (aS<0) penalty += 5;
   }
-
-  // balansstraff (undvik att allt blir ojämnt)
-  penalty += Math.abs(b3-b6)*2;
 
   return penalty;
 }
 
-// ---------------- FULL SIMULATION ----------------
-function simulateTimeline(b3,b6,bS) {
+// ---------- GRAPH ----------
+let chart;
+
+function draw(best){
 
   let a3 = +a3El.value;
   let a6 = +a6El.value;
@@ -146,68 +153,62 @@ function simulateTimeline(b3,b6,bS) {
   let now = new Date("2020-01-01T08:00");
 
   let hours = (goal-now)/3600000;
-  let step = 0.05;
+  let step = 0.1;
 
   let labels=[], d3=[], d6=[], dS=[];
 
-  for (let t=0;t<hours;t+=step) {
+  let in3 = (+incomingEl.value*0.40)/hours;
+  let in6 = (+incomingEl.value*0.58)/hours;
+  let inS = (+incomingEl.value*0.01)/hours;
 
-    let in3 = (a3*0.4)/hours;
-    let in6 = (a6*0.58)/hours;
-    let inS = (aS*0.01)/hours;
+  for (let t=0;t<hours;t+=step){
 
-    a3 += in3*step - b3*s3*step;
-    a6 += in6*step - b6*s6*step;
-    aS += inS*step - bS*sS*step;
+    a3 += in3*step - best.b3*s3*step;
+    a6 += in6*step - best.b6*s6*step;
+    aS += inS*step - best.bS*sS*step;
 
-    a3 = Math.max(0,a3);
-    a6 = Math.max(0,a6);
-    aS = Math.max(0,aS);
-
-    labels.push(t.toFixed(2));
+    labels.push(t.toFixed(1));
     d3.push(a3);
     d6.push(a6);
     dS.push(aS);
   }
-
-  return {labels,d3,d6,dS};
-}
-
-// ---------------- RENDER ----------------
-function render() {
-
-  let best = optimizeStaff();
-
-  recommendation.innerHTML =
-    `<div class="card">
-    Optimal bemanning:<br>
-    3m: ${best.b3} | 6m: ${best.b6} | S: ${best.bS}
-    </div>`;
-
-  let sim = simulateTimeline(best.b3,best.b6,best.bS);
 
   if (chart) chart.destroy();
 
   chart = new Chart(chartEl,{
     type:'line',
     data:{
-      labels:sim.labels,
+      labels,
       datasets:[
-        {label:'3m',data:sim.d3},
-        {label:'6m',data:sim.d6},
-        {label:'S',data:sim.dS}
+        {label:'3m',data:d3},
+        {label:'6m',data:d6},
+        {label:'S',data:dS}
       ]
     }
   });
-
-  status.innerHTML = "<div class='good'>Optimering klar</div>";
 }
 
-setInterval(render, 60000); // varje minut
+// ---------- UI ----------
+function render(){
 
-// init
-render();
+  let best = optimize();
 
+  rec.innerHTML =
+    `3m: ${best.b3} | 6m: ${best.b6} | S: ${best.bS}`;
+
+  status.innerHTML =
+    `<div class="card">System optimerat</div>`;
+
+  draw(best);
+}
+
+// ---------- LOOP ----------
+setInterval(()=>{
+  updateClock();
+  render();
+}, 5000);
+
+// ---------- ELEMENTS ----------
 const a3El=document.getElementById("a3");
 const a6El=document.getElementById("a6");
 const aSEl=document.getElementById("aS");
@@ -218,11 +219,14 @@ const sSEl=document.getElementById("sS");
 
 const staff=document.getElementById("staff");
 const goalEl=document.getElementById("goal");
+const incomingEl=document.getElementById("incoming");
 
+const rec=document.getElementById("rec");
+const status=document.getElementById("status");
 const chartEl=document.getElementById("chart");
 
-const recommendation=document.getElementById("recommendation");
-const status=document.getElementById("status");
+render();
+
 </script>
 
 </body>
