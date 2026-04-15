@@ -2,7 +2,7 @@
 <html lang="sv">
 <head>
 <meta charset="UTF-8">
-<title>Plock Control v15</title>
+<title>Plock Control v16</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
 <style>
@@ -13,20 +13,14 @@ body {
   margin:auto;
 }
 
-h2 { margin-top: 10px; }
-
-.grid {
-  display:grid;
-  grid-template-columns:1fr 1fr;
-  gap:16px;
-}
+.grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
 
 .card {
   background:white;
   padding:12px;
   border-radius:8px;
-  box-shadow:0 1px 4px rgba(0,0,0,0.1);
   margin-top:10px;
+  box-shadow:0 1px 4px rgba(0,0,0,0.1);
 }
 
 .top {
@@ -47,7 +41,7 @@ input { width:90px; }
 
 <body>
 
-<h2>Plock Control v15 – Stabil beslutsmotor</h2>
+<h2>Plock Control v16 – Stabil engine</h2>
 
 <div class="top">
 <div>⏰ Nu: <input id="now" type="time" value="20:00"></div>
@@ -60,27 +54,25 @@ input { width:90px; }
 <h3>📦 Lägesbild</h3>
 3m <input id="a3" value="200"><br>
 6m <input id="a6" value="200"><br>
-S <input id="aS" value="100"><br><br>
-
-Inflöde <input id="inflow" value="0">
+S <input id="aS" value="100">
 </div>
 
 <div class="card">
-<h3>⚙ RT per person</h3>
+<h3>⚙ RT</h3>
 3m <input id="r3" value="14"><br>
 6m <input id="r6" value="10"><br>
-S <input id="rS" value="8"><br><br>
+S <input id="rS" value="8">
 
 <h3>👥 Bemanning</h3>
 3m <input id="b3" value="1"><br>
 6m <input id="b6" value="1"><br>
-S <input id="bS" value="0"><br>
+S <input id="bS" value="0">
 </div>
 
 </div>
 
 <div class="card">
-<h3>Rekommendation</h3>
+<h3>🧠 AI</h3>
 <div id="rec"></div>
 </div>
 
@@ -100,24 +92,33 @@ let chart;
 
 // ---------- TIME ----------
 function t(x){
-  let [h,m] = x.split(":").map(Number);
+  let [h,m]=x.split(":").map(Number);
   return h + m/60;
 }
 
-// ---------- SIMULATION ----------
-function simulate(b3,b6,bS){
+// ---------- SNAPSHOT ----------
+function getData(){
+  return {
+    a3: Number(a3.value),
+    a6: Number(a6.value),
+    aS: Number(aS.value),
+    r3: Number(r3.value),
+    r6: Number(r6.value),
+    rS: Number(rS.value),
+    b3: Number(b3.value),
+    b6: Number(b6.value),
+    bS: Number(bS.value)
+  };
+}
+
+// ---------- SIM ----------
+function simulate(data){
 
   let start = t(now.value);
   let end = t(goal.value);
-  let hours = Math.max(0.1, end - start);
+  let hours = Math.max(0.1, end-start);
 
-  let a3 = Number(a3El.value || 0);
-  let a6 = Number(a6El.value || 0);
-  let aS = Number(aSEl.value || 0);
-
-  let r3 = Number(r3El.value || 0);
-  let r6 = Number(r6El.value || 0);
-  let rS = Number(rSEl.value || 0);
+  let a3=data.a3, a6=data.a6, aS=data.aS;
 
   let risk = 0;
   let breakdown = null;
@@ -127,12 +128,11 @@ function simulate(b3,b6,bS){
   for(let i=0;i<hours;i+=step){
 
     let production =
-      b3*r3 + b6*r6 + bS*rS;
+      data.b3*data.r3 +
+      data.b6*data.r6 +
+      data.bS*data.rS;
 
-    let demand =
-      (Number(a3El.value) +
-       Number(a6El.value) +
-       Number(aSEl.value)) / hours;
+    let demand = (data.a3+data.a6+data.aS)/hours;
 
     let net = production - demand;
 
@@ -140,31 +140,30 @@ function simulate(b3,b6,bS){
     a6 -= net*step;
     aS -= net*step;
 
-    if(a3 < 0 || a6 < 0 || aS < 0){
+    if(a3<0 || a6<0 || aS<0){
       risk++;
-      if(!breakdown) breakdown = start + i;
+      if(!breakdown) breakdown = start+i;
     }
   }
 
   return {risk, breakdown};
 }
 
-// ---------- OPTIMIZER ----------
-function optimize(){
+// ---------- OPT ----------
+function optimize(data){
 
-  let total =
-    Number(b3El.value) +
-    Number(b6El.value) +
-    Number(bSEl.value);
+  let total = data.b3+data.b6+data.bS;
 
-  let best = null;
-  let bestRisk = Infinity;
+  let best=null, bestRisk=1e9;
 
   for(let x=0;x<=total;x++){
     for(let y=0;y<=total-x;y++){
-      let z = total - x - y;
+      let z=total-x-y;
 
-      let sim = simulate(x,y,z);
+      let sim = simulate({
+        ...data,
+        b3:x,b6:y,bS:z
+      });
 
       if(sim.risk < bestRisk){
         bestRisk = sim.risk;
@@ -176,92 +175,54 @@ function optimize(){
   return best;
 }
 
-// ---------- STATUS ----------
-function getStatus(best){
+// ---------- UI ----------
+function render(){
 
-  if(!best || !best.sim){
-    return "<div class='bad'>❌ Ingen data</div>";
-  }
+  const data = getData();
+  const best = optimize(data);
 
-  if(best.sim.breakdown){
-    return `<div class='bad'>
-❌ Risk för kapacitetsbrist<br>
-Tid till problem: <b>${best.sim.breakdown.toFixed(1)}h</b>
-</div>`;
-  }
+  rec.innerHTML =
+    best.sim.breakdown
+      ? "❌ Risk för problem"
+      : "✔ Stabil drift";
 
-  return "<div class='good'>✔ Stabil drift hela perioden</div>";
-}
+  status.innerHTML =
+    best.sim.breakdown
+      ? `❌ Problem ca ${best.sim.breakdown.toFixed(1)}h`
+      : "✔ OK";
 
-// ---------- AI ----------
-function getRec(best){
-
-  if(!best) return "❌ Ingen optimering";
-
-  let cap =
-    best.b3*(Number(r3El.value)) +
-    best.b6*(Number(r6El.value)) +
-    best.bS*(Number(rSEl.value));
-
-  let demand =
-    (Number(a3El.value) +
-     Number(a6El.value) +
-     Number(aSEl.value)) /
-    Math.max(0.1, (t(goal.value)-t(now.value)));
-
-  let gap = demand - cap;
-
-  if(Math.abs(gap) < 0.5){
-    return "✔ Balans mellan kapacitet och behov";
-  }
-
-  if(gap > 0){
-    return `❌ Underskott: ${gap.toFixed(1)} rader/timme<br>
-👉 Öka bemanning eller RT`;
-  }
-
-  return `✔ Överkapacitet: ${Math.abs(gap).toFixed(1)}<br>
-👉 Omfördela resurser`;
+  draw(best, data);
 }
 
 // ---------- GRAPH ----------
-function draw(best){
-
-  if(!best) return;
+function draw(best,data){
 
   let start = t(now.value);
   let end = t(goal.value);
-  let hours = Math.max(0.1, end-start);
+  let hours = Math.max(0.1,end-start);
 
-  let a3 = Number(a3El.value || 0);
-  let a6 = Number(a6El.value || 0);
-  let aS = Number(aSEl.value || 0);
-
-  let r3 = Number(r3El.value || 0);
-  let r6 = Number(r6El.value || 0);
-  let rS = Number(rSEl.value || 0);
-
-  let step = 0.1;
+  let a3=data.a3, a6=data.a6, aS=data.aS;
 
   let labels=[], d3=[], d6=[], dS=[];
 
+  let step=0.1;
+
   for(let i=0;i<hours;i+=step){
 
-    let cur = start + i;
-
     let production =
-      best.b3*r3 + best.b6*r6 + best.bS*rS;
+      best.b3*data.r3 +
+      best.b6*data.r6 +
+      best.bS*data.rS;
 
-    let demand =
-      (Number(a3El.value)+Number(a6El.value)+Number(aSEl.value))/hours;
+    let demand = (data.a3+data.a6+data.aS)/hours;
 
-    let net = production - demand;
+    let net = production-demand;
 
-    a3 -= net*step;
-    a6 -= net*step;
-    aS -= net*step;
+    a3-=net*step;
+    a6-=net*step;
+    aS-=net*step;
 
-    labels.push(Math.floor(cur)+":00");
+    labels.push(Math.floor(start+i)+":00");
     d3.push(Math.max(0,a3));
     d6.push(Math.max(0,a6));
     dS.push(Math.max(0,aS));
@@ -278,46 +239,28 @@ function draw(best){
         {label:"6m",data:d6,borderColor:"green"},
         {label:"S",data:dS,borderColor:"orange"}
       ]
-    },
-    options:{
-      responsive:true
     }
   });
 }
 
-// ---------- RENDER ----------
-function render(){
-
-  let best = optimize();
-
-  recEl.innerHTML = getRec(best);
-  statusEl.innerHTML = getStatus(best);
-
-  draw(best);
-}
-
-setInterval(render,10000);
+setInterval(render,2000);
 render();
 
-// ---------- ELEMENTS ----------
-const now = document.getElementById("now");
-const goal = document.getElementById("goal");
+const a3=document.getElementById("a3");
+const a6=document.getElementById("a6");
+const aS=document.getElementById("aS");
 
-const a3El = document.getElementById("a3");
-const a6El = document.getElementById("a6");
-const aSEl = document.getElementById("aS");
+const r3=document.getElementById("r3");
+const r6=document.getElementById("r6");
+const rS=document.getElementById("rS");
 
-const r3El = document.getElementById("r3");
-const r6El = document.getElementById("r6");
-const rSEl = document.getElementById("rS");
+const b3=document.getElementById("b3");
+const b6=document.getElementById("b6");
+const bS=document.getElementById("bS");
 
-const b3El = document.getElementById("b3");
-const b6El = document.getElementById("b6");
-const bSEl = document.getElementById("bS");
-
-const recEl = document.getElementById("rec");
-const statusEl = document.getElementById("status");
-const chartEl = document.getElementById("chart");
+const rec=document.getElementById("rec");
+const status=document.getElementById("status");
+const chartEl=document.getElementById("chart");
 
 </script>
 
